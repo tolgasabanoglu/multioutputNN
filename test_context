@@ -1,75 +1,54 @@
-import pandas as pd
-
-# Example DataFrame structure:
-# Columns: ['country', 'GDP', 'population', 'unemployment_rate', 'urbanization_rate', 
-#           'furniture_revenue', 'diy_revenue', 'home_care_revenue']
-
-# Load and preprocess your data
-data = pd.read_csv('your_data.csv')
-
-# Features (X): socio-economic variables
-X_all = data[['GDP', 'population', 'unemployment_rate', 'urbanization_rate']]
-
-# Labels (y): revenues for 3 markets in the 30 known countries
-y = data[['furniture_revenue', 'diy_revenue', 'home_care_revenue']]
-
-# architecture:
-
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from keras.models import Sequential
 from keras.layers import Dense
+from keras.wrappers.scikit_learn import KerasRegressor
 
-# Split data into training and test sets
-X_train, X_test, y_train, y_test = train_test_split(X_all, y, test_size=0.3, random_state=42)
+# Function to build the model
+def build_model(input_dim, neurons_1=128, neurons_2=64):
+    model = Sequential()
+    model.add(Dense(neurons_1, input_dim=input_dim, activation='relu'))
+    model.add(Dense(neurons_2, activation='relu'))
+    model.add(Dense(3, activation='linear'))  # Multi-output regression (for 3 markets)
+    
+    model.compile(loss='mean_squared_error', optimizer='adam', metrics=['mean_absolute_error'])
+    return model
 
-# Scale data
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
-
-# Build the model
-model = Sequential()
-model.add(Dense(128, input_dim=X_train_scaled.shape[1], activation='relu'))
-model.add(Dense(64, activation='relu'))
-model.add(Dense(y_train.shape[1], activation='linear'))  # Multi-output regression for 3 markets
-
-# Compile the model
-model.compile(loss='mean_squared_error', optimizer='adam', metrics=['mean_absolute_error'])
-
-# Train the model
-model.fit(X_train_scaled, y_train, epochs=100, batch_size=32, validation_split=0.2)
-
-# Evaluate the model
-loss, mae = model.evaluate(X_test_scaled, y_test)
-print(f"Mean Absolute Error: {mae}")
-
-
-# Assume `X_all` is the DataFrame containing features for all 150 countries
-X_all_scaled = scaler.transform(X_all)
-predicted_revenues = model.predict(X_all_scaled)
-
-# `predicted_revenues` will contain the estimated revenues for all three markets across all 150 countries
-
-
-# Example DataFrame structure:
-# Columns: ['GDP', 'population', 'unemployment_rate', 'urbanization_rate']
-
-# Load your original data if needed
-data = pd.read_csv('your_data.csv')
-
-# Assume `X_all` is the DataFrame containing features for all 150 countries
-# and `predicted_revenues` is the array containing predicted revenues for all three markets
-
-# Create a new DataFrame to store the predicted revenues along with the original features
-predicted_data = pd.DataFrame(X_all, columns=['GDP', 'population', 'unemployment_rate', 'urbanization_rate'])
-
-# Add predicted revenues to the DataFrame
-predicted_data['predicted_furniture_revenue'] = predicted_revenues[:, 0]  # Assuming column order matches predicted_revenues
-predicted_data['predicted_diy_revenue'] = predicted_revenues[:, 1]
-predicted_data['predicted_home_care_revenue'] = predicted_revenues[:, 2]
-
-# Save the predicted data to a new CSV file
-predicted_data.to_csv('predicted_revenues.csv', index=False)
-
-
+# Function to train and optimize the model with GridSearchCV
+def train_model_with_grid_search(X, y):
+    # Split the data into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    
+    # Scale the data
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    
+    # Wrap the Keras model for GridSearchCV
+    model = KerasRegressor(build_fn=build_model, input_dim=X_train_scaled.shape[1], epochs=100, batch_size=32, verbose=0)
+    
+    # Hyperparameter grid to tune
+    param_grid = {
+        'neurons_1': [64, 128, 256],
+        'neurons_2': [32, 64, 128],
+        'batch_size': [16, 32, 64],
+        'epochs': [50, 100, 150]
+    }
+    
+    # GridSearchCV for hyperparameter optimization
+    grid = GridSearchCV(estimator=model, param_grid=param_grid, cv=3)
+    
+    # Train the model
+    grid_result = grid.fit(X_train_scaled, y_train)
+    
+    # Get the best model and hyperparameters
+    best_model = grid_result.best_estimator_
+    best_params = grid_result.best_params_
+    
+    print(f"Best Hyperparameters: {best_params}")
+    
+    # Evaluate the model on the test set
+    loss, mae = best_model.model.evaluate(X_test_scaled, y_test)
+    print(f"Test Loss: {loss}, Test MAE: {mae}")
+    
+    return best_model, best_params
